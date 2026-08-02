@@ -1,6 +1,10 @@
 package di
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/PowerPenguini/errs"
+)
 
 func ExecuteInTx[T any](d *DI, fn func(txDI *DI) (T, error)) (T, error) {
 	var zero T
@@ -10,7 +14,7 @@ func ExecuteInTx[T any](d *DI, fn func(txDI *DI) (T, error)) (T, error) {
 
 	tx, err := d.db.Begin()
 	if err != nil {
-		return zero, err
+		return zero, errs.NewError("transaction_begin_failed", "failed to begin transaction", errs.InternalType, err)
 	}
 
 	txDI := d.WithTx(tx)
@@ -21,7 +25,7 @@ func ExecuteInTx[T any](d *DI, fn func(txDI *DI) (T, error)) (T, error) {
 	}
 
 	if err := tx.Commit(); err != nil {
-		return zero, err
+		return zero, errs.NewError("transaction_commit_failed", "failed to commit transaction", errs.InternalType, err)
 	}
 	return result, nil
 }
@@ -33,16 +37,20 @@ func ExecuteInTxNoResult(d *DI, fn func(txDI *DI) error) error {
 
 	tx, err := d.db.Begin()
 	if err != nil {
-		return err
+		return errs.NewError("transaction_begin_failed", "failed to begin transaction", errs.InternalType, err)
 	}
 
 	txDI := d.WithTx(tx)
 	if err := fn(txDI); err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("rollback failed: %v, original error: %w", rbErr, err)
+			cause := fmt.Errorf("rollback failed: %v, original error: %w", rbErr, err)
+			return errs.NewError("transaction_rollback_failed", "failed to rollback transaction", errs.InternalType, cause)
 		}
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return errs.NewError("transaction_commit_failed", "failed to commit transaction", errs.InternalType, err)
+	}
+	return nil
 }

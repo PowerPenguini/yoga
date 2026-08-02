@@ -1,3 +1,5 @@
+github.com/PowerPenguini/errs v0.1.3 h1:hhfgEaLfKJHWuFIYygX8nlJPcJ7Sr0oYkUa//zxKI/s=
+github.com/PowerPenguini/errs v0.1.3/go.mod h1:hMj5wGjg/hyZWYjyaUTHjJuvHwYBtL8XD5DAdUcx6co=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

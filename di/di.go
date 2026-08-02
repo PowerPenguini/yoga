@@ -16,7 +16,8 @@ type svc struct {
 }
 
 type repo struct {
-	ItemRepo *repos.ItemRepo
+	ItemRepo        *repos.ItemRepo
+	OutboxEventRepo *repos.OutboxEventRepo
 }
 
 type view struct {
@@ -24,7 +25,8 @@ type view struct {
 }
 
 type val struct {
-	ItemValidator *validators.ItemValidator
+	ItemValidator        *validators.ItemValidator
+	OutboxEventValidator *validators.OutboxEventValidator
 }
 
 type sharedDeps struct {
@@ -70,7 +72,7 @@ func buildDI(db *sql.DB, tx *sql.Tx, shared sharedDeps) *DI {
 		svc:    shared.Services,
 		repo:   repos,
 		view:   shared.Views,
-		val:    buildValidators(repos),
+		val:    buildValidators(),
 		Logger: shared.Logger,
 		db:     db,
 		tx:     tx,
@@ -87,7 +89,8 @@ func buildServices() svc {
 
 func buildRepos(db repos.DBTX) repo {
 	return repo{
-		ItemRepo: repos.NewItemRepo(db),
+		ItemRepo:        repos.NewItemRepo(db),
+		OutboxEventRepo: repos.NewOutboxEventRepo(db),
 	}
 }
 
@@ -97,9 +100,10 @@ func buildViews(db *sql.DB, logger *log.Logger) view {
 	}
 }
 
-func buildValidators(repos repo) val {
+func buildValidators() val {
 	return val{
-		ItemValidator: validators.NewItemValidator(repos.ItemRepo),
+		ItemValidator:        validators.NewItemValidator(),
+		OutboxEventValidator: validators.NewOutboxEventValidator(),
 	}
 }
 

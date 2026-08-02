@@ -36,6 +36,8 @@ func main() {
 	mux.HandleFunc("GET /health", healthHandler.GetHealth)
 	mux.HandleFunc("POST /items", itemHandler.PostItem)
 	mux.HandleFunc("GET /items", itemHandler.GetItems)
+	mux.HandleFunc("PATCH /items/{item_id}", itemHandler.PatchItem)
+	mux.HandleFunc("DELETE /items/{item_id}", itemHandler.DeleteItem)
 
 	server := &http.Server{
 		Addr:    ":8080",
