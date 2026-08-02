@@ -9,7 +9,7 @@ This is not an imported DI library. The DI code belongs inside each service so t
 - Local `di.DI` with `svc`, `repo`, `view`, and `val` groups.
 - Local `repos.DBTX` so repositories work with both `*sql.DB` and `*sql.Tx`.
 - `di.ExecuteInTx` and `di.ExecuteInTxNoResult`.
-- A short local `DI.WithTx` that rebuilds repositories and validators with the transaction executor.
+- A short local `DI.WithTx` that rebuilds transaction-sensitive dependencies with the transaction executor.
 - Panic-only wiring guardrails via `DI.MustValidateWiring`.
 - Minimal HTTP handlers, logic action, repo, validator, view, model, and contract examples.
 
@@ -24,9 +24,36 @@ logic            business actions
 models           domain models
 repos            DBTX and write repositories
 services         external services/shared utilities
-validators       model validators
+validators       entity validators
 views            read/query layer
 ```
+
+## Architecture Rules
+
+Keep ownership of behavior explicit:
+
+- `handlers` only translate transport data: decode a request, construct a logic action, call it, and encode the result.
+- `logic` owns use-case orchestration. Normalization happens only here, before data is mapped to a model or validated.
+- Every action that has action-specific preconditions exposes its own `Validate` method in `logic`. For example, checking that a name is available belongs to `CreateItem.Validate`, because the rule applies to creating an item rather than to every valid item.
+- Every validator is a concrete struct named after exactly one entity, such as `ItemValidator`. Its `Validate` method accepts that entity and checks rules that are true for the entity regardless of the action that produced it. Do not create action-named validators such as `CreateItemValidator`.
+- Validators inspect data; they do not normalize or mutate it. They must not contain create-, update-, delete-, or transport-specific rules.
+- `repos` own persistence, not business workflow. `views` own reads shaped for presentation. Neither layer normalizes input or decides which business action is allowed.
+
+The expected action order is:
+
+```text
+normalize action input
+        ↓
+build the entity
+        ↓
+validate entity-wide rules with EntityValidator
+        ↓
+validate action-specific rules with Action.Validate
+        ↓
+perform repository writes
+```
+
+For the example domain, whitespace trimming belongs to `logic.CreateItem.Normalize`, the required name belongs to `validators.ItemValidator`, and name availability belongs to `logic.CreateItem.Validate`.
 
 ## Start A New Service
 
@@ -77,7 +104,7 @@ func (d *DI) WithTx(tx *sql.Tx) *DI {
 }
 ```
 
-The important boundary is simple: services/views/logger are shared, while repos and validators are rebuilt with the current SQL executor.
+The important boundary is simple: services, views, and the logger are shared, while transaction-sensitive dependencies are rebuilt with the current SQL executor.
 
 ## Repository Pattern
 
@@ -106,8 +133,14 @@ That lets `buildRepos(db)` and `buildRepos(tx)` use the same constructors.
 Use `ExecuteInTx` when the action returns a result:
 
 ```go
+action := CreateItem{Name: inputName}.Normalize()
+item := models.Item{Name: action.Name}
+
 result, err := di.ExecuteInTx(deps, func(txDI *di.DI) (*CreateItemResult, error) {
-	if err := txDI.ItemValidator.Validate(ctx, item); err != nil {
+	if err := txDI.ItemValidator.Validate(item); err != nil {
+		return nil, err
+	}
+	if err := action.Validate(ctx, txDI); err != nil {
 		return nil, err
 	}
 	id, err := txDI.ItemRepo.Insert(ctx, item)

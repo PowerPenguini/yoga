@@ -2,6 +2,7 @@ package logic
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"main/di"
@@ -16,11 +17,31 @@ type CreateItemResult struct {
 	Item models.Item
 }
 
+func (c CreateItem) Normalize() CreateItem {
+	c.Name = strings.TrimSpace(c.Name)
+	return c
+}
+
+func (c CreateItem) Validate(ctx context.Context, deps *di.DI) error {
+	exists, err := deps.ItemRepo.ExistsByName(ctx, c.Name)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return errors.New("item name already exists")
+	}
+	return nil
+}
+
 func (c CreateItem) Execute(ctx context.Context, deps *di.DI) (*CreateItemResult, error) {
-	item := models.Item{Name: strings.TrimSpace(c.Name)}
+	c = c.Normalize()
+	item := models.Item{Name: c.Name}
 
 	result, err := di.ExecuteInTx(deps, func(txDI *di.DI) (*CreateItemResult, error) {
-		if err := txDI.ItemValidator.Validate(ctx, item); err != nil {
+		if err := txDI.ItemValidator.Validate(item); err != nil {
+			return nil, err
+		}
+		if err := c.Validate(ctx, txDI); err != nil {
 			return nil, err
 		}
 

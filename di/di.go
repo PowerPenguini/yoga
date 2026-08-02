@@ -70,7 +70,7 @@ func buildDI(db *sql.DB, tx *sql.Tx, shared sharedDeps) *DI {
 		svc:    shared.Services,
 		repo:   repos,
 		view:   shared.Views,
-		val:    buildValidators(repos),
+		val:    buildValidators(),
 		Logger: shared.Logger,
 		db:     db,
 		tx:     tx,
@@ -97,9 +97,9 @@ func buildViews(db *sql.DB, logger *log.Logger) view {
 	}
 }
 
-func buildValidators(repos repo) val {
+func buildValidators() val {
 	return val{
-		ItemValidator: validators.NewItemValidator(repos.ItemRepo),
+		ItemValidator: validators.NewItemValidator(),
 	}
 }
 
