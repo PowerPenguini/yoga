@@ -43,7 +43,10 @@ func TestMustValidateWiringPanicsWhenDIIsIncomplete(t *testing.T) {
 	if !strings.Contains(msg, "invalid DI wiring:") {
 		t.Fatalf("panic %q does not contain wiring prefix", msg)
 	}
-	if !strings.Contains(msg, "repo.ItemRepo") || !strings.Contains(msg, "val.ItemValidator") {
+	if !strings.Contains(msg, "repo.ItemRepo") ||
+		!strings.Contains(msg, "repo.OutboxEventRepo") ||
+		!strings.Contains(msg, "val.ItemValidator") ||
+		!strings.Contains(msg, "val.OutboxEventValidator") {
 		t.Fatalf("panic %q does not include missing repo and validator", msg)
 	}
 }

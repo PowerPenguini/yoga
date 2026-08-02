@@ -200,6 +200,9 @@ func TestWithTxRebuildsReposWithTxExecutor(t *testing.T) {
 	if _, ok := txDI.ItemRepo.Executor().(*sql.Tx); !ok {
 		t.Fatalf("repo executor = %T, want *sql.Tx", txDI.ItemRepo.Executor())
 	}
+	if _, ok := txDI.OutboxEventRepo.Executor().(*sql.Tx); !ok {
+		t.Fatalf("outbox repo executor = %T, want *sql.Tx", txDI.OutboxEventRepo.Executor())
+	}
 }
 
 func assertTxStats(t *testing.T, stats *txStats, begins, commits, rollbacks int64) {
