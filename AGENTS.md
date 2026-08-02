@@ -62,6 +62,8 @@ Enforce these dependency rules:
 - Handlers may depend on `contract`, `logic`, `views`, and `di`.
 - Logic may depend on `di`, `models`, typed errors, and domain helpers/services.
 - Repositories and validators may depend on `models`, but must not depend on handlers.
+- A validator may depend on any repositories and domain services required to enforce invariants of its entity, including conditions involving other entities.
+- Inject validator dependencies explicitly through its constructor, preferably as narrow interfaces owned by the `validators` package. Do not pass the whole `*di.DI` into a validator.
 
 ## Handlers and Contracts
 
@@ -192,7 +194,20 @@ The invariant is that normalization, state loading, action validation, model val
   - formats;
   - numeric/date ranges;
   - relationships between fields on the model;
-  - action-independent entity relationships.
+  - action-independent entity relationships;
+  - existence and validity of referenced entities;
+  - compatibility constraints spanning the validated entity and other entities;
+  - action-independent domain uniqueness constraints.
+- Validators may use any number of repositories or domain services needed to enforce those rules. They are not limited to a repository named after the validated entity.
+- Cross-entity checks still belong to the validator only when they are invariants of the resulting model. Workflow preconditions, permissions, allowed transitions, and rules specific to one create/update/archive action remain in `Action.Validate`.
+- Treat repository-backed cross-entity validation as a final sanity check of the prepared model, not as the source of business workflow or orchestration.
+- Business logic must not depend on validators to load domain data, choose a strategy, select the next state, calculate values, or decide which operation to execute. Logic performs those steps explicitly through repositories/services before model validation.
+- A validator is a pass/fail gate before persistence. Its normal contract returns only an error; do not return related entities, IDs, calculated values, or workflow decisions from `Validate`.
+- Logic may stop and return a validation error, but it must not inspect validator error codes/types to branch into an alternative business path.
+- If logic needs information about another entity for later execution, load that information in the action. The validator may independently re-check the corresponding invariant as a sanity check.
+- Inject repositories/services through the validator constructor as explicit narrow interfaces. Do not inject `*di.DI`, use viewers, open transactions, or query the database outside the injected dependencies.
+- When validation runs inside a transaction, every repository injected into the validator must be rebuilt from the same `*sql.Tx`; never retain a root `*sql.DB` repository in a transaction-scoped validator.
+- Map a repository/service lookup failure to `errs.InternalType`. Map a successfully evaluated but violated domain constraint to `errs.ValidationType`.
 - Validators inspect models and never mutate them.
 - Validators do not normalize models.
 - Validators do not own create-, update-, delete-, archive-, transport-, permission-, or transition-specific rules.
@@ -280,7 +295,8 @@ Additional error rules:
 - `NewDI` creates the root database and shared dependencies.
 - `buildDI` composes both root and transaction graphs.
 - `WithTx` rebuilds every transaction-sensitive repository using the `*sql.Tx` executor.
-- Rebuild validators with transaction-scoped repository dependencies when validators have such dependencies.
+- Rebuild validators with all of their transaction-scoped repository dependencies when validators have such dependencies, including repositories for related entities.
+- Never reuse a root validator in `txDI` if any of its dependencies access the database through the root `*sql.DB`.
 - Share services, viewers, and the logger when they are not transaction-sensitive.
 - Register every dependency in its DI group and constructor builder.
 - Run `MustValidateWiring` during both root DI creation and transaction graph construction.
@@ -299,6 +315,10 @@ Additional error rules:
 - Code availability for create/update -> the corresponding action `Validate`.
 - Required item name and code format -> `ItemValidator.Validate`.
 - Selected entity-field validation -> `ItemValidator.ValidateFields`.
+- Referenced entity existence or cross-entity compatibility that must hold for every valid model -> entity validator using injected repositories.
+- Permission, state transition, or cross-entity condition specific to one workflow -> that action's `Validate`.
+- Loading related data, selecting behavior, calculating values, or choosing the next state -> logic action, never an entity validator.
+- Re-checking that the fully prepared model still satisfies a cross-entity invariant before persistence -> validator sanity check.
 - SQL and `sql.ErrNoRows` handling -> repository.
 - Response-shaped list query -> viewer.
 - Atomic domain write and event record -> logic transaction plus outbox.
@@ -341,6 +361,8 @@ When adding or replacing a domain:
 - Check that handlers and validators do not contain SQL/driver-specific logic.
 - Check that repositories do not accept `contract` DTOs.
 - Check that every inserted/updated model is validated first.
+- Check that repository-backed validators declare explicit dependencies and that transaction-scoped validators receive only repositories built from the active `*sql.Tx`.
+- Check that no business branch, state calculation, or data-loading flow depends on a validator result beyond returning its error.
 - Check root and transactional DI wiring.
 - Check nested actions reuse the active transaction.
 - Check typed errors reach handlers instead of raw infrastructure errors.

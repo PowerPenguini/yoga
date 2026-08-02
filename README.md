@@ -84,6 +84,13 @@ HTTP read request ──parsed by handler──▶ viewer ──▶ contract res
 - Every validator is a concrete struct named after exactly one entity, such as `ItemValidator` or `OutboxEventValidator`.
 - `Validate` accepts the complete model represented by that validator.
 - Entity validators check rules that remain true regardless of the action: required model fields, lengths, formats, ranges, and relationships between model fields.
+- A validator may use any repositories and domain services needed to enforce those invariants, including referenced-entity existence and compatibility constraints involving other entities. It is not limited to the repository named after its own entity.
+- Inject validator dependencies explicitly through its constructor, preferably as narrow interfaces owned by `validators`; do not pass `*di.DI` into a validator.
+- Cross-entity checks belong here only when they must hold for every valid instance of the model. Conditions specific to one workflow, permission, or state transition remain in `Action.Validate`.
+- Repository-backed cross-entity validation is a final sanity check of the prepared model. Business logic must not use validators to load data, calculate values, select behavior, or choose state transitions.
+- A validator is a pass/fail gate and normally returns only an error. If an action needs related entity data, it loads that data explicitly; the validator may independently re-check the invariant before persistence.
+- Logic returns validator errors instead of branching on their codes/types to choose an alternative workflow.
+- Repository lookup failures become typed internal errors; a successfully checked but violated domain constraint becomes a validation error.
 - Validators inspect data; they do not normalize or mutate it.
 - Do not create action-named validators such as `CreateItemValidator`.
 - For targeted validation, expose `ValidateFields(fields, model)` or `ValidateWithout(fields, model)`. These methods still accept the entity model; never introduce a `ValidationInput` DTO.
@@ -123,6 +130,10 @@ HTTP read request ──parsed by handler──▶ viewer ──▶ contract res
 | Code must be available for this create/update action | `logic.Validate` | `CreateItem.Validate`, `UpdateItem.Validate` |
 | Item name is required and code has a valid format | entity validator | `ItemValidator.Validate` |
 | Only selected entity fields should be checked | entity validator | `ItemValidator.ValidateFields` |
+| Referenced entity must exist for every valid model | entity validator using an injected related-entity repo | `EntityValidator.Validate` |
+| Cross-entity condition applies only to one workflow | `logic.Validate` | `Action.Validate` |
+| Related data or decision is needed to execute the workflow | logic action using repo/service directly | `Action.Execute` |
+| Prepared model needs a final cross-entity invariant check | entity validator sanity check | `EntityValidator.Validate` |
 | SQL and `sql.ErrNoRows` handling | repository | `ItemRepo.SelectByIDForUpdate` |
 | Response-shaped list query | viewer | `ItemViewer.List` |
 | Domain change and integration event must be atomic | logic + transaction | `CreateItem` + `EnqueueItemEvent` |
@@ -232,7 +243,7 @@ func buildDI(db *sql.DB, tx *sql.Tx, shared sharedDeps) *DI {
 }
 ```
 
-Services, views, and the logger are shared. Repositories are rebuilt with the current SQL executor. Validators are reconstructed as part of the graph; validators that need transaction-sensitive dependencies must receive the transaction-scoped repository instances.
+Services, views, and the logger are shared. Repositories are rebuilt with the current SQL executor. Validators are reconstructed as part of the graph; validators may receive any repositories/services required by their entity invariants. Every database-backed validator dependency in `txDI` must be the transaction-scoped instance built from the same `*sql.Tx`, including repositories that represent related entities.
 
 `DI.MustValidateWiring` runs for both `NewDI` and `WithTx`. Missing repository or validator wiring fails immediately rather than becoming a nil-pointer failure inside business logic.
 
