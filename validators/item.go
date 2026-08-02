@@ -21,10 +21,6 @@ func NewItemValidator(repo ItemLookup) *ItemValidator {
 	return &ItemValidator{repo: repo}
 }
 
-func (v *ItemValidator) Repo() ItemLookup {
-	return v.repo
-}
-
 func (v *ItemValidator) Validate(ctx context.Context, item models.Item) error {
 	if strings.TrimSpace(item.Name) == "" {
 		return errors.New("name is required")

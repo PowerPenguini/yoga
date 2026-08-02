@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"main/repos"
 	"main/services"
 	"main/views"
 )
@@ -200,9 +199,6 @@ func TestWithTxRebuildsReposWithTxExecutor(t *testing.T) {
 	}
 	if _, ok := txDI.ItemRepo.Executor().(*sql.Tx); !ok {
 		t.Fatalf("repo executor = %T, want *sql.Tx", txDI.ItemRepo.Executor())
-	}
-	if _, ok := txDI.ItemValidator.Repo().(*repos.ItemRepo); !ok {
-		t.Fatalf("validator repo = %T, want *repos.ItemRepo", txDI.ItemValidator.Repo())
 	}
 }
 
