@@ -90,6 +90,12 @@ Enforce these dependency rules:
 - Represent every use case as a concrete action struct such as `CreateItem`, `UpdateItem`, or `ArchiveItem`.
 - Define action input and result structs in `logic`.
 - Action inputs and results contain primitives, typed IDs, and logic-local types; they never contain `contract` DTOs.
+- Keep exactly one top-level business action per `logic/*.go` action file.
+- Keep that action's complete local API in the same file: the action struct, action-specific `Input`/`Value`/line-item types, its `Result`, constants, `Normalize`, `Validate`, `Execute`, and private helpers used only by that action.
+- Do not scatter one action across generic files such as `values.go`, `results.go`, or `types.go`.
+- If a nested operation is itself a reusable business action, give it its own action file. Do not place two actions in one file merely because they concern the same entity.
+- A separate shared file is allowed only for a type/helper that is genuinely used by multiple actions and represents a stable shared domain abstraction. Keep action-specific values beside their action.
+- Name action files after the action in snake_case, for example `create_item.go`, `update_item.go`, and `archive_item.go`.
 - Do not accept a model as the public input to an action. Construct or merge models inside the action.
 - Do not return `contract` types from logic.
 - Keep orchestration in `Execute`.
@@ -337,7 +343,7 @@ Additional error rules:
 When adding or replacing a domain:
 
 1. define request/response DTOs in `contract`;
-2. define logic-local action and result structs;
+2. create one action file containing its action, action-specific values/input types, result, methods, and private helpers;
 3. add `Normalize`, action `Validate`, and `Execute`;
 4. define the persisted model;
 5. add exactly one validator per model;
@@ -358,6 +364,7 @@ When adding or replacing a domain:
 - Run `go vet ./...` for structural or cross-package changes.
 - Run `go test -race ./...` for transaction, concurrency, worker, or shared-state changes.
 - Check that `logic` does not import `contract`.
+- Check that every action file contains only one top-level business action and keeps all action-specific value/result types with it.
 - Check that handlers and validators do not contain SQL/driver-specific logic.
 - Check that repositories do not accept `contract` DTOs.
 - Check that every inserted/updated model is validated first.

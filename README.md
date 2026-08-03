@@ -72,6 +72,9 @@ HTTP read request ──parsed by handler──▶ viewer ──▶ contract res
 
 - Each use case is a concrete action struct, for example `CreateItem`, `UpdateItem`, or `ArchiveItem`.
 - Action inputs and results are local to `logic`. They contain primitives and typed IDs, not `contract` DTOs.
+- Keep exactly one top-level business action per action file. The same file contains its action-specific input/value types, `Result`, constants, `Normalize`, `Validate`, `Execute`, and private helpers.
+- Do not split a single action across generic `values.go`, `results.go`, or `types.go` files, and do not place several actions in one file.
+- Move a type/helper to a shared file only when multiple actions genuinely share a stable domain abstraction; nested reusable actions receive their own files.
 - Actions do not accept models as public input. They construct or update models internally.
 - `Normalize` exists only in `logic`. It should be deterministic and idempotent.
 - Action-specific preconditions belong to `Action.Validate`: required raw IDs, entity existence, allowed state transitions, permissions, uniqueness for that action, and duplicate input entries.
@@ -323,7 +326,7 @@ The outbox table intentionally contains `published_at` even though this template
 2. Change the module path in `go.mod`.
 3. Replace the example `Item` and `OutboxEvent` domain files.
 4. Define request/response DTOs in `contract`.
-5. Add logic-local action and result structs.
+5. Add one file per logic action containing its action-specific values/input types, result, methods, and private helpers.
 6. Add one validator per persisted model.
 7. Add DBTX-backed repositories and read viewers.
 8. Register dependencies in `di.repo`, `di.val`, `di.view`, and `di.svc`.
