@@ -62,6 +62,8 @@ Enforce these dependency rules:
 - Handlers may depend on `contract`, `logic`, `views`, and `di`.
 - Logic may depend on `di`, `models`, typed errors, and domain helpers/services.
 - Repositories and validators may depend on `models`, but must not depend on handlers.
+- A validator may depend on any repositories and domain services required to enforce invariants of its entity, including conditions involving other entities.
+- Inject validator dependencies explicitly through its constructor, preferably as narrow interfaces owned by the `validators` package. Do not pass the whole `*di.DI` into a validator.
 
 ## Handlers and Contracts
 
@@ -88,6 +90,12 @@ Enforce these dependency rules:
 - Represent every use case as a concrete action struct such as `CreateItem`, `UpdateItem`, or `ArchiveItem`.
 - Define action input and result structs in `logic`.
 - Action inputs and results contain primitives, typed IDs, and logic-local types; they never contain `contract` DTOs.
+- Keep exactly one top-level business action per `logic/*.go` action file.
+- Keep that action's complete local API in the same file: the action struct, action-specific `Input`/`Value`/line-item types, its `Result`, constants, `Normalize`, `Validate`, `Execute`, and private helpers used only by that action.
+- Do not scatter one action across generic files such as `values.go`, `results.go`, or `types.go`.
+- If a nested operation is itself a reusable business action, give it its own action file. Do not place two actions in one file merely because they concern the same entity.
+- A separate shared file is allowed only for a type/helper that is genuinely used by multiple actions and represents a stable shared domain abstraction. Keep action-specific values beside their action.
+- Name action files after the action in snake_case, for example `create_item.go`, `update_item.go`, and `archive_item.go`.
 - Do not accept a model as the public input to an action. Construct or merge models inside the action.
 - Do not return `contract` types from logic.
 - Keep orchestration in `Execute`.
@@ -192,7 +200,20 @@ The invariant is that normalization, state loading, action validation, model val
   - formats;
   - numeric/date ranges;
   - relationships between fields on the model;
-  - action-independent entity relationships.
+  - action-independent entity relationships;
+  - existence and validity of referenced entities;
+  - compatibility constraints spanning the validated entity and other entities;
+  - action-independent domain uniqueness constraints.
+- Validators may use any number of repositories or domain services needed to enforce those rules. They are not limited to a repository named after the validated entity.
+- Cross-entity checks still belong to the validator only when they are invariants of the resulting model. Workflow preconditions, permissions, allowed transitions, and rules specific to one create/update/archive action remain in `Action.Validate`.
+- Treat repository-backed cross-entity validation as a final sanity check of the prepared model, not as the source of business workflow or orchestration.
+- Business logic must not depend on validators to load domain data, choose a strategy, select the next state, calculate values, or decide which operation to execute. Logic performs those steps explicitly through repositories/services before model validation.
+- A validator is a pass/fail gate before persistence. Its normal contract returns only an error; do not return related entities, IDs, calculated values, or workflow decisions from `Validate`.
+- Logic may stop and return a validation error, but it must not inspect validator error codes/types to branch into an alternative business path.
+- If logic needs information about another entity for later execution, load that information in the action. The validator may independently re-check the corresponding invariant as a sanity check.
+- Inject repositories/services through the validator constructor as explicit narrow interfaces. Do not inject `*di.DI`, use viewers, open transactions, or query the database outside the injected dependencies.
+- When validation runs inside a transaction, every repository injected into the validator must be rebuilt from the same `*sql.Tx`; never retain a root `*sql.DB` repository in a transaction-scoped validator.
+- Map a repository/service lookup failure to `errs.InternalType`. Map a successfully evaluated but violated domain constraint to `errs.ValidationType`.
 - Validators inspect models and never mutate them.
 - Validators do not normalize models.
 - Validators do not own create-, update-, delete-, archive-, transport-, permission-, or transition-specific rules.
@@ -280,7 +301,8 @@ Additional error rules:
 - `NewDI` creates the root database and shared dependencies.
 - `buildDI` composes both root and transaction graphs.
 - `WithTx` rebuilds every transaction-sensitive repository using the `*sql.Tx` executor.
-- Rebuild validators with transaction-scoped repository dependencies when validators have such dependencies.
+- Rebuild validators with all of their transaction-scoped repository dependencies when validators have such dependencies, including repositories for related entities.
+- Never reuse a root validator in `txDI` if any of its dependencies access the database through the root `*sql.DB`.
 - Share services, viewers, and the logger when they are not transaction-sensitive.
 - Register every dependency in its DI group and constructor builder.
 - Run `MustValidateWiring` during both root DI creation and transaction graph construction.
@@ -299,6 +321,10 @@ Additional error rules:
 - Code availability for create/update -> the corresponding action `Validate`.
 - Required item name and code format -> `ItemValidator.Validate`.
 - Selected entity-field validation -> `ItemValidator.ValidateFields`.
+- Referenced entity existence or cross-entity compatibility that must hold for every valid model -> entity validator using injected repositories.
+- Permission, state transition, or cross-entity condition specific to one workflow -> that action's `Validate`.
+- Loading related data, selecting behavior, calculating values, or choosing the next state -> logic action, never an entity validator.
+- Re-checking that the fully prepared model still satisfies a cross-entity invariant before persistence -> validator sanity check.
 - SQL and `sql.ErrNoRows` handling -> repository.
 - Response-shaped list query -> viewer.
 - Atomic domain write and event record -> logic transaction plus outbox.
@@ -317,7 +343,7 @@ Additional error rules:
 When adding or replacing a domain:
 
 1. define request/response DTOs in `contract`;
-2. define logic-local action and result structs;
+2. create one action file containing its action, action-specific values/input types, result, methods, and private helpers;
 3. add `Normalize`, action `Validate`, and `Execute`;
 4. define the persisted model;
 5. add exactly one validator per model;
@@ -338,9 +364,12 @@ When adding or replacing a domain:
 - Run `go vet ./...` for structural or cross-package changes.
 - Run `go test -race ./...` for transaction, concurrency, worker, or shared-state changes.
 - Check that `logic` does not import `contract`.
+- Check that every action file contains only one top-level business action and keeps all action-specific value/result types with it.
 - Check that handlers and validators do not contain SQL/driver-specific logic.
 - Check that repositories do not accept `contract` DTOs.
 - Check that every inserted/updated model is validated first.
+- Check that repository-backed validators declare explicit dependencies and that transaction-scoped validators receive only repositories built from the active `*sql.Tx`.
+- Check that no business branch, state calculation, or data-loading flow depends on a validator result beyond returning its error.
 - Check root and transactional DI wiring.
 - Check nested actions reuse the active transaction.
 - Check typed errors reach handlers instead of raw infrastructure errors.
