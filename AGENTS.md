@@ -232,7 +232,7 @@ The invariant is that normalization, state loading, action validation, model val
 - Insert and update methods accept entity models.
 - Do not accept HTTP DTOs or long lists of loose model fields in repository write methods.
 - Repositories own SQL, scanning, affected-row checks, and driver details.
-- Repositories may translate `sql.ErrNoRows` into `nil` or a boolean so logic stays driver-agnostic.
+- Repository lookups translate `sql.ErrNoRows` into an explicit absence result such as `(nil, nil)` or `(false, nil)` so logic and validators stay driver-agnostic. Reserve the `error` result for lookup failures.
 - Expose explicit state-loading methods such as `SelectByIDForUpdate`.
 - Expose explicit locking existence checks such as `ExistsByCodeForUpdate` or `ExistsByCodeOtherForUpdate` when needed by an action.
 - Return infrastructure errors to logic; do not map them to HTTP responses.
@@ -283,6 +283,34 @@ Additional error rules:
 - Never expose raw SQL, driver, filesystem, network, or downstream-client errors to handlers/clients.
 - Handlers call `errs.WriteError`; they do not duplicate status-selection switches.
 - Views and logic must wrap raw infrastructure failures before returning them.
+
+### Error ownership and repository results
+
+For updates, apply this order inside the write transaction. Creates and state-only actions follow their respective flows in Action Ordering, with the same error boundaries:
+
+1. `Action.Validate` loads and locks current state through `SelectByIDForUpdate` or the appropriate locking repository query. It checks action-specific existence, availability, permissions, and allowed transitions before writing. Return the loaded state when `Execute` needs it.
+2. The entity validator checks the prepared model and its action-independent invariants, including referenced entities. Return its typed error unchanged.
+3. The repository performs the write. If it returns a non-nil `error`, wrap that failure as `errs.InternalType` with the original cause. An unexpected write failure after validation is HTTP 500.
+4. If the repository returns a successful result with `err == nil`, interpret that result according to its explicit contract. A boolean such as `updated == false` is a result, not an infrastructure error.
+
+| Repository outcome | Owner and handling |
+| --- | --- |
+| Lookup returns `(nil, nil)` for the action's target | `Action.Validate` returns `NotFoundType` with the action's specific message. |
+| Existence query returns `(false, nil)` for a model reference | The entity validator returns a field `ValidationType` error. |
+| Availability query reports an existing conflicting value with `err == nil` | `Action.Validate` returns a specific `ValidationType` error before the write. |
+| Lookup or write returns a non-nil infrastructure `error` | Logic or the validator wraps it as `InternalType`, preserving its cause. |
+| Write returns `(false, nil)` | Logic interprets the documented boolean result. For example, `UpdateItem` returns `NotFoundType` when no row was updated. |
+| Validator or nested action returns an already typed error | The caller returns it unchanged; the handler serializes it with `errs.WriteError`. |
+
+The `err != nil` branch always takes precedence over an accompanying `nil` model or `false` result. Inspect absence or boolean results only after establishing `err == nil`.
+
+Do not use a failed `INSERT`, `UPDATE`, or `DELETE` as domain validation. Do not translate a constraint failure into a sentinel such as `ErrConflict` or `ErrNotFound` so logic can reinterpret the write error as 404 or 422. Perform the corresponding check in `Action.Validate` or the entity validator before writing. Database constraints remain the final integrity safeguard; a constraint error that still occurs is an internal failure.
+
+A locking lookup does not guarantee that the write or commit cannot fail. Handle supported concurrency retries at the transaction boundary; if the operation ultimately fails, return `InternalType` rather than inferring a business condition from the database error.
+
+Handlers do not reclassify errors returned by actions or viewers. Parent actions do not wrap an already typed validation, not-found, or permission error in a new internal error. A new infrastructure failure, such as failed commit or rollback, owns the outer `InternalType`; serialization must preserve that outer classification even when its cause contains a validation error or `ErrorList`.
+
+For an error-handling review, use this table to check both the successful repository result and the error path. Use `logic/update_item.go` as the reference: its `err != nil` branch returns 500, while its separate `!updated` branch handles a boolean result with `err == nil`.
 
 ## Transactions
 
@@ -373,4 +401,6 @@ When adding or replacing a domain:
 - Check root and transactional DI wiring.
 - Check nested actions reuse the active transaction.
 - Check typed errors reach handlers instead of raw infrastructure errors.
+- Check expected absence and availability are evaluated before writes, repository `error` results become internal failures, and boolean results are interpreted only when `err == nil`.
+- Check callers preserve typed errors from validators, nested actions, and viewers, and serialization preserves the outer error classification.
 - Keep unrelated worktree changes out of the commit.

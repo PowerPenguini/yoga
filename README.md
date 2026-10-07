@@ -79,7 +79,7 @@ HTTP read request ──parsed by handler──▶ viewer ──▶ contract res
 - `Normalize` exists only in `logic`. It should be deterministic and idempotent.
 - Action-specific preconditions belong to `Action.Validate`: required raw IDs, entity existence, allowed state transitions, permissions, uniqueness for that action, and duplicate input entries.
 - If validation depends on current state, load and lock that state in the same transaction used for the write.
-- Map repository failures to precise domain/internal errors. Do not inspect SQLSTATE or driver-specific errors in logic.
+- Interpret successful repository results as domain outcomes; wrap repository infrastructure failures as internal errors. Follow [error ownership and repository results](AGENTS.md#error-ownership-and-repository-results).
 - Return a logic-local result and let the handler build the response DTO.
 
 ### Entity validators
@@ -103,9 +103,9 @@ HTTP read request ──parsed by handler──▶ viewer ──▶ contract res
 
 - Repositories accept the local `repos.DBTX` interface, never a concrete `*sql.DB`.
 - Insert and update methods accept models. They do not accept HTTP DTOs or large lists of loose arguments.
-- Repositories own SQL and driver details. They may translate `sql.ErrNoRows` into `nil` or a boolean so logic stays driver-agnostic.
+- Repositories own SQL and driver details. Lookups translate `sql.ErrNoRows` into absence with `err == nil`, such as `(nil, nil)` or `(false, nil)`.
 - Expose explicit locking methods such as `SelectByIDForUpdate` and `ExistsByCodeOtherForUpdate` when an action makes a state-dependent decision before writing.
-- Return infrastructure errors to logic; logic wraps them as domain/internal errors.
+- Return infrastructure errors to logic; logic wraps them as `InternalType`. Domain preconditions are checked before writing.
 - Database constraints remain the final concurrency safety net even when an action performs a friendly pre-check.
 
 ### Views
@@ -153,6 +153,10 @@ The template uses the same `github.com/PowerPenguini/errs` package as Frostbox:
 | `InternalType` | logic/view wrapping infrastructure failure | 500 |
 
 Validators may return `errs.ErrorList` to report several independent entity problems in one response. Logic should usually return one precise action failure. Preserve the infrastructure error as the cause of an internal error for logs and debugging, but expose only the stable code/message through the HTTP layer.
+
+The normative [error ownership rules](AGENTS.md#error-ownership-and-repository-results) distinguish a repository's successful result from its `error`. In `UpdateItem`, a lookup returning `(nil, nil)` becomes 404 in `Validate`. After validation, a non-nil error from `Update` becomes 500. The separate `(false, nil)` result means no row was updated and can become 404. A constraint error after validation follows the 500 path; it does not replace a pre-write domain check.
+
+The reference uses `errs v0.1.3`. Its serializer searches for `ErrorList` through the cause chain before checking a typed `Error`. If an outer `InternalType` wraps a validation list, that version can serialize 422 instead of 500. The outer-classification rule in `AGENTS.md` remains normative; services must verify this case when selecting or adapting their error serializer.
 
 ## Reference Flows
 
